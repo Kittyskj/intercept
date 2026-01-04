@@ -51,6 +51,30 @@ Open http://localhost:5050 in your browser.
 
 > **Note:** Requires Python 3.9+ and external tools. See [Hardware & Installation](docs/HARDWARE.md).
 
+### Proxy & safety controls
+
+External data fetches (e.g., satellite TLE updates) honor standard proxy environment variables. Set any of the following before launching the app:
+
+- `INTERCEPT_HTTP_PROXY` / `HTTP_PROXY`
+- `INTERCEPT_HTTPS_PROXY` / `HTTPS_PROXY`
+- `INTERCEPT_FTP_PROXY` / `FTP_PROXY`
+- `INTERCEPT_SOCKS_PROXY` / `SOCKS_PROXY`
+
+You can also tune network safeguards for satellite TLE requests:
+
+- `INTERCEPT_TLE_ALLOWED_HOSTS` — comma-separated allowlist of hosts (default: CelesTrak domains)
+- `INTERCEPT_TLE_REQUEST_TIMEOUT` — request timeout in seconds (default: `10`)
+- `INTERCEPT_TLE_MAX_RESPONSE_SIZE` — maximum response size in bytes (default: `1048576`)
+- `INTERCEPT_TLE_USER_AGENT` — custom User-Agent header for outbound TLE fetches
+
+Both uppercase and lowercase forms are accepted for proxy variables.
+
+### Full translations / Полные переводы / 完整翻译 / पूर्ण अनुवाद
+
+- [README (Русский)](README.ru.md)
+- [README (中文)](README.zh.md)
+- [README (हिन्दी)](README.hi.md)
+
 ---
 
 ## Requirements

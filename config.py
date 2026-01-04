@@ -28,6 +28,16 @@ def _get_env_float(key: str, default: float) -> float:
         return default
 
 
+def _get_env_list(key: str, default: list[str]) -> list[str]:
+    """Get a comma-separated environment variable as list with default."""
+    raw_value = os.environ.get(f'INTERCEPT_{key}')
+    if not raw_value:
+        return list(default)
+
+    entries = [item.strip() for item in raw_value.split(',') if item.strip()]
+    return entries if entries else list(default)
+
+
 def _get_env_bool(key: str, default: bool) -> bool:
     """Get environment variable as boolean with default."""
     val = os.environ.get(f'INTERCEPT_{key}', '').lower()
@@ -36,6 +46,16 @@ def _get_env_bool(key: str, default: bool) -> bool:
     if val in ('false', '0', 'no', 'off'):
         return False
     return default
+
+
+def _get_proxy_value(key: str) -> str | None:
+    """Get proxy URL from INTERCEPT_* or standard environment variables."""
+    env_keys = [f'INTERCEPT_{key}', key.upper(), key.lower()]
+    for env_key in env_keys:
+        val = os.environ.get(env_key)
+        if val and val.strip():
+            return val.strip()
+    return None
 
 
 # Logging configuration
@@ -82,8 +102,30 @@ SATELLITE_UPDATE_INTERVAL = _get_env_int('SATELLITE_UPDATE_INTERVAL', 30)
 SATELLITE_TRAJECTORY_POINTS = _get_env_int('SATELLITE_TRAJECTORY_POINTS', 30)
 SATELLITE_ORBIT_MINUTES = _get_env_int('SATELLITE_ORBIT_MINUTES', 45)
 
+# External TLE request safeguards
+TLE_ALLOWED_HOSTS = _get_env_list(
+    'TLE_ALLOWED_HOSTS',
+    [
+        'celestrak.org',
+        'celestrak.com',
+        'www.celestrak.org',
+        'www.celestrak.com'
+    ]
+)
+TLE_REQUEST_TIMEOUT = _get_env_int('TLE_REQUEST_TIMEOUT', 10)
+TLE_MAX_RESPONSE_SIZE = _get_env_int('TLE_MAX_RESPONSE_SIZE', 1024 * 1024)
+TLE_USER_AGENT = _get_env('TLE_USER_AGENT', 'intercept/1.0 (satellite-tle-fetcher)')
+
 # Maximum burst count for Iridium monitoring
 IRIDIUM_MAX_BURSTS = _get_env_int('IRIDIUM_MAX_BURSTS', 100)
+
+# Proxy settings (used for external network requests)
+PROXIES = {
+    'http': _get_proxy_value('HTTP_PROXY'),
+    'https': _get_proxy_value('HTTPS_PROXY'),
+    'ftp': _get_proxy_value('FTP_PROXY'),
+    'socks': _get_proxy_value('SOCKS_PROXY')
+}
 
 
 def configure_logging() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 from typing import Any
@@ -11,19 +12,71 @@ from urllib.parse import urlparse
 from flask import Blueprint, jsonify, request, render_template, Response
 
 from data.satellites import TLE_SATELLITES
+from config import (
+    PROXIES,
+    TLE_ALLOWED_HOSTS,
+    TLE_MAX_RESPONSE_SIZE,
+    TLE_REQUEST_TIMEOUT,
+    TLE_USER_AGENT
+)
 from utils.logging import satellite_logger as logger
 from utils.validation import validate_latitude, validate_longitude, validate_hours, validate_elevation
 
 satellite_bp = Blueprint('satellite', __name__, url_prefix='/satellite')
 
-# Maximum response size for external requests (1MB)
-MAX_RESPONSE_SIZE = 1024 * 1024
+# Maximum response size for external requests (1MB by default)
+MAX_RESPONSE_SIZE = TLE_MAX_RESPONSE_SIZE
 
-# Allowed hosts for TLE fetching
-ALLOWED_TLE_HOSTS = ['celestrak.org', 'celestrak.com', 'www.celestrak.org', 'www.celestrak.com']
+# Allowed hosts for TLE fetching (configurable)
+ALLOWED_TLE_HOSTS = TLE_ALLOWED_HOSTS
 
 # Local TLE cache (can be updated via API)
 _tle_cache = dict(TLE_SATELLITES)
+
+
+def _build_proxy_opener() -> urllib.request.OpenerDirector:
+    """Create an opener that respects configured proxy settings."""
+    proxy_map = {scheme: url for scheme, url in PROXIES.items() if url}
+    handlers: list[urllib.request.BaseHandler] = []
+
+    if proxy_map:
+        handlers.append(urllib.request.ProxyHandler(proxy_map))
+
+    return urllib.request.build_opener(*handlers)
+
+
+def _fetch_url(url: str) -> str:
+    """Fetch a URL with proxy support and basic safety checks."""
+    parsed = urlparse(url)
+
+    if parsed.scheme not in {'http', 'https'}:
+        raise ValueError('Only http/https protocols are allowed')
+
+    if parsed.hostname not in ALLOWED_TLE_HOSTS:
+        raise ValueError('Requested host is not allowed')
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            'User-Agent': TLE_USER_AGENT,
+            'Accept': 'text/plain'
+        }
+    )
+
+    opener = _build_proxy_opener()
+    try:
+        with opener.open(request, timeout=TLE_REQUEST_TIMEOUT) as response:
+            content = response.read(MAX_RESPONSE_SIZE + 1)
+    except urllib.error.HTTPError as exc:
+        raise ValueError(f'HTTP error {exc.code} while fetching TLE data') from exc
+    except urllib.error.URLError as exc:
+        raise ValueError(f'Unable to fetch TLE data: {exc.reason}') from exc
+
+    if len(content) > MAX_RESPONSE_SIZE:
+        raise ValueError('Response too large')
+
+    encoding = response.headers.get_content_charset() or 'utf-8'
+    return content.decode(encoding, errors='replace')
 
 
 @satellite_bp.route('/dashboard')
@@ -312,27 +365,26 @@ def update_tle():
         for group in ['stations', 'weather']:
             url = f'https://celestrak.org/NORAD/elements/gp.php?GROUP={group}&FORMAT=tle'
             try:
-                with urllib.request.urlopen(url, timeout=10) as response:
-                    content = response.read().decode('utf-8')
-                    lines = content.strip().split('\n')
+                content = _fetch_url(url)
+                lines = content.strip().split('\n')
 
-                    i = 0
-                    while i + 2 < len(lines):
-                        name = lines[i].strip()
-                        line1 = lines[i + 1].strip()
-                        line2 = lines[i + 2].strip()
+                i = 0
+                while i + 2 < len(lines):
+                    name = lines[i].strip()
+                    line1 = lines[i + 1].strip()
+                    line2 = lines[i + 2].strip()
 
-                        if not (line1.startswith('1 ') and line2.startswith('2 ')):
-                            i += 1
-                            continue
+                    if not (line1.startswith('1 ') and line2.startswith('2 ')):
+                        i += 1
+                        continue
 
-                        internal_name = name_mappings.get(name, name)
+                    internal_name = name_mappings.get(name, name)
 
-                        if internal_name in _tle_cache:
-                            _tle_cache[internal_name] = (name, line1, line2)
-                            updated.append(internal_name)
+                    if internal_name in _tle_cache:
+                        _tle_cache[internal_name] = (name, line1, line2)
+                        updated.append(internal_name)
 
-                        i += 3
+                    i += 3
             except Exception as e:
                 logger.error(f"Error fetching {group}: {e}")
                 continue
@@ -343,6 +395,7 @@ def update_tle():
         })
 
     except Exception as e:
+        logger.error(f"TLE update failed: {e}")
         return jsonify({'status': 'error', 'message': str(e)})
 
 
@@ -361,8 +414,7 @@ def fetch_celestrak(category):
 
     try:
         url = f'https://celestrak.org/NORAD/elements/gp.php?GROUP={category}&FORMAT=tle'
-        with urllib.request.urlopen(url, timeout=10) as response:
-            content = response.read().decode('utf-8')
+        content = _fetch_url(url)
 
         satellites = []
         lines = content.strip().split('\n')
